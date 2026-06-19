@@ -1,6 +1,7 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use privacy_proxy_core::{Config, Engine, Mode};
 use serde_json::{json, Value};
+use std::hint::black_box;
 
 const HASH_KEY: &[u8] = b"criterion-benchmark-key";
 

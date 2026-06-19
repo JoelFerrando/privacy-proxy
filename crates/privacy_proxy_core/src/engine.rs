@@ -1,5 +1,5 @@
 use crate::{Config, DetectorKind, Error, Mode, Result, ScanReport};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use regex::{Captures, Regex};
 use serde_json::{Map, Value};
 use sha2::Sha256;

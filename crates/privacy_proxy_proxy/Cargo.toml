@@ -6,7 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-axum = "0.7"
+axum = "0.8"
 bytes = "1"
 http = "1"
 privacy_proxy_core = { path = "../privacy_proxy_core" }
