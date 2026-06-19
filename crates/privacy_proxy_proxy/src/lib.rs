@@ -565,8 +565,10 @@ fn split_line_ending(line: &str) -> (&str, &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::HeaderValue;
+    use axum::http::{HeaderValue, Uri};
+    use axum::routing::any;
     use privacy_proxy_core::Config;
+    use std::sync::MutexGuard;
     use tower::ServiceExt;
 
     fn engine() -> Engine {
@@ -581,6 +583,62 @@ mod tests {
             config,
             metrics: Arc::new(ProxyMetrics::default()),
         }
+    }
+
+    #[derive(Clone, Default)]
+    struct UpstreamCapture {
+        received: Arc<Mutex<Option<ReceivedRequest>>>,
+    }
+
+    #[derive(Debug)]
+    struct ReceivedRequest {
+        path_and_query: String,
+        authorization: Option<String>,
+        cookie: Option<String>,
+        x_session_id: Option<String>,
+        body: String,
+    }
+
+    impl UpstreamCapture {
+        fn lock(&self) -> MutexGuard<'_, Option<ReceivedRequest>> {
+            self.received.lock().expect("capture lock is not poisoned")
+        }
+
+        fn take(&self) -> ReceivedRequest {
+            self.lock()
+                .take()
+                .expect("upstream should receive one request")
+        }
+    }
+
+    async fn upstream_handler(
+        State(capture): State<UpstreamCapture>,
+        uri: Uri,
+        headers: HeaderMap,
+        body: Bytes,
+    ) -> impl IntoResponse {
+        let body = String::from_utf8(body.to_vec()).expect("proxy forwards utf-8 body");
+        let request = ReceivedRequest {
+            path_and_query: uri
+                .path_and_query()
+                .map(|value| value.as_str().to_owned())
+                .unwrap_or_else(|| uri.path().to_owned()),
+            authorization: header_to_string(&headers, "authorization"),
+            cookie: header_to_string(&headers, "cookie"),
+            x_session_id: header_to_string(&headers, "x-session-id"),
+            body,
+        };
+
+        *capture.lock() = Some(request);
+
+        StatusCode::NO_CONTENT
+    }
+
+    fn header_to_string(headers: &HeaderMap, name: &'static str) -> Option<String> {
+        headers
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned)
     }
 
     #[test]
@@ -682,5 +740,82 @@ mod tests {
         assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
         assert!(body.contains("max_body_bytes"));
         assert!(!body.contains("secret-token-value"));
+    }
+
+    #[tokio::test]
+    async fn forwards_redacted_request_to_real_upstream_and_records_metrics() {
+        let capture = UpstreamCapture::default();
+        let upstream = Router::new()
+            .fallback(any(upstream_handler))
+            .with_state(capture.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind upstream listener");
+        let upstream_addr = listener.local_addr().expect("read upstream address");
+        let upstream_server = tokio::spawn(async move { axum::serve(listener, upstream).await });
+
+        let config = Config::default();
+        let proxy_state = ProxyState {
+            target: Url::parse(&format!("http://{upstream_addr}/collect")).expect("url parses"),
+            client: reqwest::Client::new(),
+            engine: Engine::new(config.clone()).expect("engine builds"),
+            config,
+            metrics: Arc::new(ProxyMetrics::default()),
+        };
+        let app = router(proxy_state);
+        let request = Request::builder()
+            .method("POST")
+            .uri("/ingest?source=test")
+            .header(CONTENT_TYPE, "application/json")
+            .header("authorization", "Bearer live-token-value-123456")
+            .header("cookie", "session=live-cookie; theme=dark")
+            .header("x-session-id", "session-secret-value")
+            .body(Body::from(
+                r#"{"email":"alice@example.test","authorization":"Bearer example-token-value-123456","message":"card 4111 1111 1111 1111"}"#,
+            ))
+            .expect("request builds");
+
+        let response = app.clone().oneshot(request).await.expect("proxy responds");
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let received = capture.take();
+        assert_eq!(received.path_and_query, "/collect/ingest?source=test");
+        assert_eq!(received.authorization.as_deref(), Some("[REDACTED:header]"));
+        assert_eq!(received.cookie.as_deref(), Some("[REDACTED:header]"));
+        assert_eq!(received.x_session_id.as_deref(), Some("[REDACTED:header]"));
+        assert!(received.body.contains("[REDACTED:email]"));
+        assert!(received.body.contains("[REDACTED:bearer_token]"));
+        assert!(received.body.contains("[REDACTED:credit_card]"));
+        assert!(!received.body.contains("alice@example.test"));
+        assert!(!received.body.contains("example-token-value"));
+        assert!(!received.body.contains("4111 1111 1111 1111"));
+
+        let metrics_response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/metrics")
+                    .body(Body::empty())
+                    .expect("metrics request builds"),
+            )
+            .await
+            .expect("metrics respond");
+        let metrics_body = to_bytes(metrics_response.into_body(), 4096)
+            .await
+            .expect("metrics body reads");
+        let metrics: Value =
+            serde_json::from_slice(&metrics_body).expect("metrics response is JSON");
+
+        assert_eq!(metrics["requests"], 1);
+        assert_eq!(metrics["upstream_errors"], 0);
+        assert_eq!(metrics["rejected_payloads"], 0);
+        assert_eq!(metrics["redactions_by_type"]["email"], 1);
+        assert_eq!(metrics["redactions_by_type"]["credit_card"], 1);
+        assert_eq!(metrics["redactions_by_type"]["cookie"], 1);
+        assert_eq!(metrics["redactions_by_type"]["api_key"], 1);
+        assert_eq!(metrics["redactions_by_type"]["bearer_token"], 2);
+
+        upstream_server.abort();
     }
 }
