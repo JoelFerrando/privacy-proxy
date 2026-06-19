@@ -15,6 +15,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -75,6 +76,7 @@ fn router(state: ProxyState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/metrics", get(metrics))
+        .route("/metrics/prometheus", get(prometheus_metrics))
         .fallback(proxy)
         .with_state(state)
 }
@@ -164,6 +166,17 @@ async fn healthz() -> impl IntoResponse {
 
 async fn metrics(State(state): State<ProxyState>) -> impl IntoResponse {
     (StatusCode::OK, axum::Json(state.metrics.snapshot()))
+}
+
+async fn prometheus_metrics(State(state): State<ProxyState>) -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        [(
+            CONTENT_TYPE,
+            HeaderValue::from_static("text/plain; version=0.0.4; charset=utf-8"),
+        )],
+        render_prometheus_metrics(&state.metrics.snapshot()),
+    )
 }
 
 async fn proxy(State(state): State<ProxyState>, request: Request<Body>) -> Response<Body> {
@@ -324,6 +337,82 @@ fn plain_response(status: StatusCode, body: &'static str) -> Response<Body> {
     let mut response = Response::new(Body::from(body));
     *response.status_mut() = status;
     response
+}
+
+fn render_prometheus_metrics(snapshot: &MetricsSnapshot) -> String {
+    let mut output = String::new();
+
+    push_counter(
+        &mut output,
+        "privacy_proxy_requests_total",
+        "Total HTTP requests handled by the proxy.",
+        snapshot.requests,
+    );
+    push_counter(
+        &mut output,
+        "privacy_proxy_upstream_errors_total",
+        "Total upstream or proxy forwarding errors.",
+        snapshot.upstream_errors,
+    );
+    push_counter(
+        &mut output,
+        "privacy_proxy_rejected_payloads_total",
+        "Total payloads rejected before forwarding.",
+        snapshot.rejected_payloads,
+    );
+    push_counter(
+        &mut output,
+        "privacy_proxy_request_bytes_total",
+        "Total request body bytes received before redaction.",
+        snapshot.request_bytes,
+    );
+    push_counter(
+        &mut output,
+        "privacy_proxy_forwarded_bytes_total",
+        "Total request body bytes forwarded after redaction.",
+        snapshot.forwarded_bytes,
+    );
+    push_counter(
+        &mut output,
+        "privacy_proxy_redactions_total",
+        "Total redactions applied by the proxy.",
+        snapshot.redactions_total,
+    );
+
+    output.push_str(
+        "# HELP privacy_proxy_redactions_by_type_total Total redactions by detector type.\n",
+    );
+    output.push_str("# TYPE privacy_proxy_redactions_by_type_total counter\n");
+    for (detector, count) in &snapshot.redactions_by_type {
+        let detector = prometheus_escape_label_value(detector);
+        let _ = writeln!(
+            output,
+            "privacy_proxy_redactions_by_type_total{{detector=\"{detector}\"}} {count}"
+        );
+    }
+
+    output
+}
+
+fn push_counter(output: &mut String, name: &str, help: &str, value: u64) {
+    let _ = writeln!(output, "# HELP {name} {help}");
+    let _ = writeln!(output, "# TYPE {name} counter");
+    let _ = writeln!(output, "{name} {value}");
+}
+
+fn prometheus_escape_label_value(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+
+    for ch in input.chars() {
+        match ch {
+            '\\' => output.push_str("\\\\"),
+            '"' => output.push_str("\\\""),
+            '\n' => output.push_str("\\n"),
+            other => output.push(other),
+        }
+    }
+
+    output
 }
 
 #[derive(Debug)]
@@ -792,6 +881,7 @@ mod tests {
         assert!(!received.body.contains("4111 1111 1111 1111"));
 
         let metrics_response = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .method("GET")
@@ -816,6 +906,37 @@ mod tests {
         assert_eq!(metrics["redactions_by_type"]["api_key"], 1);
         assert_eq!(metrics["redactions_by_type"]["bearer_token"], 2);
 
+        let prometheus_response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/metrics/prometheus")
+                    .body(Body::empty())
+                    .expect("prometheus metrics request builds"),
+            )
+            .await
+            .expect("prometheus metrics respond");
+        let prometheus_body = to_bytes(prometheus_response.into_body(), 8192)
+            .await
+            .expect("prometheus metrics body reads");
+        let prometheus = std::str::from_utf8(&prometheus_body).expect("metrics are utf-8");
+
+        assert!(prometheus.contains("privacy_proxy_requests_total 1"));
+        assert!(prometheus.contains("privacy_proxy_redactions_by_type_total{detector=\"email\"} 1"));
+        assert!(prometheus
+            .contains("privacy_proxy_redactions_by_type_total{detector=\"bearer_token\"} 2"));
+        assert!(!prometheus.contains("alice@example.test"));
+        assert!(!prometheus.contains("example-token-value"));
+        assert!(!prometheus.contains("4111 1111 1111 1111"));
+
         upstream_server.abort();
+    }
+
+    #[test]
+    fn prometheus_label_values_are_escaped() {
+        assert_eq!(
+            prometheus_escape_label_value("line\nquote\"slash\\"),
+            "line\\nquote\\\"slash\\\\"
+        );
     }
 }

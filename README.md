@@ -107,6 +107,7 @@ Then point a log sender at `http://127.0.0.1:8080`. Requests are forwarded to th
 - sensitive headers such as `authorization`, `cookie`, `set-cookie`, API key/token/secret/password/session headers replaced before forwarding
 - request bodies capped by `max_body_bytes`
 - aggregate JSON metrics at `GET /metrics`
+- Prometheus metrics at `GET /metrics/prometheus`
 - liveness at `GET /healthz`
 
 The proxy intentionally does not print request bodies, headers, matched values or URL query strings in logs.
@@ -239,7 +240,6 @@ Near-term improvements:
 
 - Add corpus-based benchmarks with realistic Sentry, Datadog, Loki and OpenTelemetry JSON shapes.
 - Add proxy streaming for very large bodies instead of buffering up to `max_body_bytes`.
-- Add optional Prometheus-format metrics alongside the current JSON metrics.
 - Add gzip/zstd request body support with decompression limits.
 - Add middleware helpers for common web frameworks.
 - Add deeper OTLP/HTTP support for OpenTelemetry collector topologies.
