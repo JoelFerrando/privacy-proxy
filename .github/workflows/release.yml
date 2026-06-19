@@ -30,7 +30,7 @@ jobs:
             binary: privacy-proxy.exe
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -52,7 +52,7 @@ jobs:
           Copy-Item README.md,LICENSE-MIT,LICENSE-APACHE dist/
           Compress-Archive -Path dist/* -DestinationPath "${{ matrix.archive }}"
       - name: Upload artifact
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: ${{ matrix.archive }}
 
