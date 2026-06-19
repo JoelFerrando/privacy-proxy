@@ -109,6 +109,7 @@ Watch aggregate counts without exposing sensitive values:
 
 ```sh
 curl http://127.0.0.1:8080/metrics
+curl http://127.0.0.1:8080/metrics/prometheus
 ```
 
 For proxy benchmarks, track:
@@ -163,4 +164,3 @@ cargo build --release -p privacy-proxy
 - Avoid JSON reserialization churn where a caller can accept `serde_json::Value` directly.
 - Add optional metrics around lines/sec, bytes/sec and detections/sec without exposing values.
 - Add proxy-level streaming for large HTTP bodies.
-- Add a Prometheus metrics endpoint for easier collector/load-test integration.
