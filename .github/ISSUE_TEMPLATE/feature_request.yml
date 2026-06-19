@@ -1,0 +1,51 @@
+name: Feature request
+description: Suggest a focused improvement.
+title: "[feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem would this solve?
+      placeholder: It is hard to use privacy-proxy with...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should change?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Detector
+        - CLI
+        - HTTP proxy
+        - Metrics
+        - Integrations
+        - Packaging
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: examples
+    attributes:
+      label: Synthetic examples
+      description: Optional fake input/output or config examples. Never paste real logs or secrets.
+      render: text
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope checklist
+      options:
+        - label: This feature can be tested with synthetic data.
+          required: true
+        - label: This request does not rely on privacy-proxy guaranteeing legal or regulatory compliance.
+          required: true
+

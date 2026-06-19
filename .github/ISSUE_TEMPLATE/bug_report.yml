@@ -1,0 +1,66 @@
+name: Bug report
+description: Report incorrect behavior with synthetic data only.
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve privacy-proxy. Please use synthetic data only. Do not paste real tokens, customer logs, emails, cookies, API keys or credentials.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong?
+      placeholder: The CLI/proxy redacted X incorrectly when...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Provide minimal commands and synthetic input.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - CLI redact
+        - CLI scan/assert
+        - HTTP proxy
+        - Core library
+        - GitHub Action
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: v0.1.0 or commit SHA
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety checklist
+      options:
+        - label: I used only synthetic data in this report.
+          required: true
+        - label: I did not include real credentials, tokens, cookies, customer logs or personal data.
+          required: true
+
