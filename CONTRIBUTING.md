@@ -15,6 +15,7 @@ cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo bench --no-run -p privacy_proxy_core --bench redaction
+cargo audit --deny warnings
 ```
 
 ## Pull Requests
