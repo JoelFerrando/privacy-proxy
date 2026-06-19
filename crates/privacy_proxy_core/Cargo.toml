@@ -1,0 +1,23 @@
+[package]
+name = "privacy_proxy_core"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hmac = "0.12"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+toml = "0.8"
+
+[dev-dependencies]
+criterion = "0.5"
+proptest = "1"
+
+[[bench]]
+name = "redaction"
+harness = false

@@ -1,0 +1,26 @@
+name: privacy-proxy assert
+description: Fail a workflow when CI logs or fixtures contain sensitive values.
+
+inputs:
+  input:
+    description: JSONL or text log file to scan.
+    required: true
+  config:
+    description: Path to privacy-proxy.toml.
+    required: false
+    default: privacy-proxy.toml
+
+runs:
+  using: composite
+  steps:
+    - name: Run privacy assertion
+      shell: bash
+      run: |
+        if command -v privacy-proxy >/dev/null 2>&1; then
+          privacy-proxy --config "${{ inputs.config }}" assert --input "${{ inputs.input }}"
+        else
+          cargo run --manifest-path "$GITHUB_ACTION_PATH/Cargo.toml" -p privacy-proxy -- \
+            --config "${{ inputs.config }}" \
+            assert \
+            --input "${{ inputs.input }}"
+        fi

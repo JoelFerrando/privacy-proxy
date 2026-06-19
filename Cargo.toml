@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "crates/privacy_proxy_core",
+    "crates/privacy_proxy_cli",
+    "crates/privacy_proxy_proxy",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.75"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"

@@ -1,0 +1,7 @@
+/target/
+fuzz/artifacts/
+fuzz/corpus/
+*.log
+clean.jsonl
+privacy-proxy.toml
+!examples/privacy-proxy.toml

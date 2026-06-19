@@ -1,0 +1,2 @@
+{"authorization":"[REDACTED:bearer_token]","email":"[REDACTED:email]","level":"error","message":"card [REDACTED:credit_card] from [REDACTED:ip]","url":"https://app.example.test/reset?token=[REDACTED:url_sensitive_params]"}
+

@@ -1,0 +1,34 @@
+mode = "mask"
+
+redact = [
+  "email",
+  "ip",
+  "jwt",
+  "bearer_token",
+  "api_key",
+  "cookie",
+  "credit_card",
+  "iban",
+  "url_sensitive_params"
+]
+
+fields_deny = [
+  "password",
+  "token",
+  "secret",
+  "apiKey",
+  "authorization",
+  "cookie",
+  "set-cookie"
+]
+
+fields_allow = [
+  "trace_id",
+  "span_id",
+  "request_id"
+]
+
+hash_env = "PRIVACY_PROXY_HASH_KEY"
+sample_limit = 10000
+max_line_bytes = 1048576
+max_body_bytes = 10485760
