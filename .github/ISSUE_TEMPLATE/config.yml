@@ -1,0 +1,6 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security issue
+    url: https://github.com/JoelFerrando/privacy-proxy/security/policy
+    about: Report sensitive leaks or security issues privately.
+
