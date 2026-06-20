@@ -1,7 +1,8 @@
 #![forbid(unsafe_code)]
 
 use anyhow::{bail, Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, Shell};
 use privacy_proxy_core::{Config, Engine, ScanReport};
 use privacy_proxy_proxy::ServeOptions;
 use serde::Serialize;
@@ -76,6 +77,13 @@ enum Command {
         /// Address to listen on.
         #[arg(long, default_value = "127.0.0.1:8080", value_name = "ADDR")]
         listen: SocketAddr,
+    },
+
+    /// Generate shell completion scripts.
+    Completions {
+        /// Shell to generate completions for.
+        #[arg(value_enum)]
+        shell: Shell,
     },
 }
 
@@ -172,7 +180,22 @@ async fn run() -> Result<()> {
 
             Ok(())
         }
+        Command::Completions { shell } => generate_completions(shell),
     }
+}
+
+fn generate_completions(shell: Shell) -> Result<()> {
+    let mut command = Cli::command();
+    let bin_name = command.get_name().to_owned();
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+
+    generate(shell, &mut command, bin_name, &mut handle);
+    handle
+        .flush()
+        .context("failed to write shell completions")?;
+
+    Ok(())
 }
 
 fn run_demo() -> Result<()> {

@@ -69,6 +69,44 @@ fn serve_help_documents_target_and_listen_flags() {
 }
 
 #[test]
+fn completions_generate_shell_scripts_without_config_file() {
+    let bash = Command::new(bin())
+        .args(["completions", "bash"])
+        .output()
+        .expect("run bash completions");
+
+    assert!(bash.status.success());
+    let bash_stdout = String::from_utf8(bash.stdout).expect("bash stdout is utf-8");
+    assert!(bash_stdout.contains("privacy-proxy"));
+    assert!(bash_stdout.contains("_privacy"));
+
+    let zsh = Command::new(bin())
+        .args(["completions", "zsh"])
+        .output()
+        .expect("run zsh completions");
+
+    assert!(zsh.status.success());
+    let zsh_stdout = String::from_utf8(zsh.stdout).expect("zsh stdout is utf-8");
+    assert!(zsh_stdout.contains("#compdef privacy-proxy"));
+    assert!(zsh_stdout.contains("redact"));
+}
+
+#[test]
+fn completions_help_lists_supported_shells() {
+    let output = Command::new(bin())
+        .args(["completions", "--help"])
+        .output()
+        .expect("run completions help");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout is utf-8");
+
+    assert!(stdout.contains("bash"));
+    assert!(stdout.contains("zsh"));
+    assert!(stdout.contains("powershell"));
+}
+
+#[test]
 fn redact_file_masks_sensitive_values() {
     let dir = tempdir().expect("tempdir");
     let config = write_config(dir.path());
