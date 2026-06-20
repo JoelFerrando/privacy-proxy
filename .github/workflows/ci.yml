@@ -23,10 +23,20 @@ jobs:
 
   audit:
     runs-on: ubuntu-latest
+    env:
+      CARGO_AUDIT_VERSION: 0.22.2
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo-audit binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-${{ runner.os }}-${{ env.CARGO_AUDIT_VERSION }}
       - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+        run: |
+          if [ ! -x "$HOME/.cargo/bin/cargo-audit" ]; then
+            cargo install cargo-audit --locked --version "$CARGO_AUDIT_VERSION"
+          fi
       - name: Audit Rust dependencies
         run: cargo audit --deny warnings

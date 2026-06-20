@@ -51,8 +51,30 @@ jobs:
           Copy-Item "target/${{ matrix.target }}/release/${{ matrix.binary }}" dist/
           Copy-Item README.md,LICENSE-MIT,LICENSE-APACHE dist/
           Compress-Archive -Path dist/* -DestinationPath "${{ matrix.archive }}"
-      - name: Upload artifact
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive }}
+          path: ${{ matrix.archive }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish release assets
+    needs: binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Generate checksums
+        run: |
+          cd release-assets
+          sha256sum privacy-proxy-* > SHA256SUMS.txt
+      - name: Upload release assets
         uses: softprops/action-gh-release@v3
         with:
-          files: ${{ matrix.archive }}
-
+          files: |
+            release-assets/privacy-proxy-*
+            release-assets/SHA256SUMS.txt
