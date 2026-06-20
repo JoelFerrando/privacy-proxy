@@ -21,6 +21,19 @@ Recommended future automation:
 
 - the included `.github/workflows/release.yml` for tag-based binaries
 - `cargo-dist` later if installers and richer release notes are needed
-- GitHub Releases with checksums
 - container image build on tags
 - crates.io publish from a protected release workflow
+
+The release workflow uploads `SHA256SUMS.txt` alongside the Linux, macOS, and
+Windows archives. On Unix-like systems, verify a downloaded archive from the
+release directory with:
+
+```sh
+sha256sum -c SHA256SUMS.txt
+```
+
+On Windows PowerShell, compare the expected hash in `SHA256SUMS.txt` with:
+
+```powershell
+Get-FileHash .\privacy-proxy-x86_64-pc-windows-msvc.zip -Algorithm SHA256
+```
