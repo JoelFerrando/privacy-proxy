@@ -47,6 +47,18 @@ After crates.io publication, the intended install command is:
 cargo install privacy-proxy
 ```
 
+Generate shell completions:
+
+```sh
+privacy-proxy completions bash > privacy-proxy.bash
+privacy-proxy completions zsh > _privacy-proxy
+privacy-proxy completions fish > privacy-proxy.fish
+privacy-proxy completions powershell > privacy-proxy.ps1
+```
+
+Install the generated file using your shell's normal completion directory. The
+command also supports `elvish`.
+
 ## Usage
 
 Try the built-in demo first:
@@ -243,7 +255,7 @@ Near-term improvements:
 - Add gzip/zstd request body support with decompression limits.
 - Add middleware helpers for common web frameworks.
 - Add deeper OTLP/HTTP support for OpenTelemetry collector topologies.
-- Add packaged releases and shell completions.
+- Publish crates.io packages and container images from protected release workflows.
 
 ## Development
 
