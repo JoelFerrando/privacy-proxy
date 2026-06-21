@@ -6,7 +6,7 @@ use clap_complete::{generate, Shell};
 use privacy_proxy_core::{Config, Engine, ScanReport};
 use privacy_proxy_proxy::ServeOptions;
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::SocketAddr;
@@ -84,6 +84,17 @@ enum Command {
         /// Shell to generate completions for.
         #[arg(value_enum)]
         shell: Shell,
+    },
+
+    /// Generate a synthetic JSONL corpus for manual performance checks.
+    GenerateCorpus {
+        /// Number of JSONL lines to generate.
+        #[arg(long, default_value_t = 1_000, value_name = "N")]
+        lines: usize,
+
+        /// Output JSONL file. Writes stdout when omitted.
+        #[arg(long, value_name = "FILE")]
+        output: Option<PathBuf>,
     },
 }
 
@@ -181,6 +192,10 @@ async fn run() -> Result<()> {
             Ok(())
         }
         Command::Completions { shell } => generate_completions(shell),
+        Command::GenerateCorpus { lines, output } => {
+            let writer = open_writer(output.as_deref())?;
+            generate_corpus(writer, lines)
+        }
     }
 }
 
@@ -196,6 +211,73 @@ fn generate_completions(shell: Shell) -> Result<()> {
         .context("failed to write shell completions")?;
 
     Ok(())
+}
+
+fn generate_corpus<W>(mut writer: W, lines: usize) -> Result<()>
+where
+    W: Write,
+{
+    if lines == 0 {
+        bail!("lines must be greater than zero");
+    }
+
+    for index in 0..lines {
+        let record = synthetic_record(index);
+        serde_json::to_writer(&mut writer, &record)
+            .context("failed to serialize synthetic JSONL record")?;
+        writer
+            .write_all(b"\n")
+            .context("failed to write synthetic JSONL line ending")?;
+    }
+
+    writer.flush().context("failed to flush synthetic corpus")?;
+    Ok(())
+}
+
+fn synthetic_record(index: usize) -> Value {
+    const SERVICES: &[&str] = &[
+        "api-gateway",
+        "checkout-worker",
+        "auth-service",
+        "billing-sync",
+    ];
+    const LEVELS: &[&str] = &["info", "warn", "error"];
+    const ROUTES: &[&str] = &["/login", "/checkout", "/password-reset", "/webhook"];
+
+    let service = SERVICES[index % SERVICES.len()];
+    let level = LEVELS[index % LEVELS.len()];
+    let route = ROUTES[index % ROUTES.len()];
+    let octet = (index % 254) + 1;
+    let minute = (index / 60) % 60;
+    let second = index % 60;
+
+    json!({
+        "timestamp": format!("2026-06-19T10:{minute:02}:{second:02}Z"),
+        "level": level,
+        "service": service,
+        "trace_id": format!("trace-{index:016x}"),
+        "span_id": format!("span-{index:016x}"),
+        "request_id": format!("req-{index:08}"),
+        "user": {
+            "id": format!("user-{index:08}"),
+            "email": format!("user{index}@example.test")
+        },
+        "request": {
+            "method": if index % 2 == 0 { "POST" } else { "GET" },
+            "route": route,
+            "ip": format!("203.0.113.{octet}"),
+            "url": format!("https://app.example.test{route}?token=synthetic-token-{index:08}&safe=true"),
+            "headers": {
+                "authorization": format!("Bearer synthetic-bearer-token-{index:08}"),
+                "cookie": format!("session=synthetic-session-{index:08}; theme=light")
+            }
+        },
+        "payment": {
+            "card": "4111 1111 1111 1111",
+            "iban": "GB82 WEST 1234 5698 7654 32"
+        },
+        "message": format!("synthetic event {index} for {service} from 203.0.113.{octet}")
+    })
 }
 
 fn run_demo() -> Result<()> {
