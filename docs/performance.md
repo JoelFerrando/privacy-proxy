@@ -76,12 +76,23 @@ Performance characteristics:
 
 ## End-to-End CLI Check
 
-To measure a real file:
+Generate a synthetic JSONL corpus with fake emails, bearer tokens, cookies,
+cards, IPs and safe trace/request IDs:
+
+```sh
+cargo run -p privacy-proxy -- generate-corpus --lines 100000 --output synthetic.jsonl
+```
+
+All generated values are fake and deterministic, using reserved `.test` domains
+and documentation IP ranges. Increase or decrease `--lines` to change the file
+size.
+
+To measure the generated file:
 
 ```sh
 cargo build --release -p privacy-proxy
 Measure-Command {
-  target/release/privacy-proxy redact --config examples/privacy-proxy.toml --input examples/logs.jsonl --output clean.jsonl
+  target/release/privacy-proxy redact --config examples/privacy-proxy.toml --input synthetic.jsonl --output clean.jsonl
 }
 ```
 
@@ -89,7 +100,7 @@ On Unix shells:
 
 ```sh
 cargo build --release -p privacy-proxy
-time target/release/privacy-proxy redact --config examples/privacy-proxy.toml --input examples/logs.jsonl --output clean.jsonl
+time target/release/privacy-proxy redact --config examples/privacy-proxy.toml --input synthetic.jsonl --output clean.jsonl
 ```
 
 Use a synthetic file large enough to drown out startup time when comparing versions.

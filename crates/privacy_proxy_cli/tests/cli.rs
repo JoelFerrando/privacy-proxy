@@ -107,6 +107,100 @@ fn completions_help_lists_supported_shells() {
 }
 
 #[test]
+fn generate_corpus_creates_redactable_jsonl() {
+    let dir = tempdir().expect("tempdir");
+    let config = write_config(dir.path());
+    let corpus = dir.path().join("synthetic.jsonl");
+    let clean = dir.path().join("clean.jsonl");
+
+    let generate = Command::new(bin())
+        .args([
+            "generate-corpus",
+            "--lines",
+            "5",
+            "--output",
+            corpus.to_str().expect("utf-8 path"),
+        ])
+        .output()
+        .expect("generate corpus");
+
+    assert!(generate.status.success());
+
+    let generated = fs::read_to_string(&corpus).expect("read generated corpus");
+    assert_eq!(generated.lines().count(), 5);
+    assert!(generated.contains("@example.test"));
+    assert!(generated.contains("synthetic-bearer-token"));
+    assert!(generated.contains("4111 1111 1111 1111"));
+    assert!(generated.contains("203.0.113."));
+
+    for line in generated.lines() {
+        serde_json::from_str::<Value>(line).expect("generated line is valid JSON");
+    }
+
+    let scan = Command::new(bin())
+        .args([
+            "--config",
+            config.to_str().expect("utf-8 path"),
+            "scan",
+            "--input",
+            corpus.to_str().expect("utf-8 path"),
+        ])
+        .output()
+        .expect("scan generated corpus");
+    assert!(scan.status.success());
+
+    let scan_stdout = String::from_utf8(scan.stdout).expect("scan stdout is utf-8");
+    let report: Value = serde_json::from_str(&scan_stdout).expect("scan output is JSON");
+    assert_eq!(report["lines_scanned"], 5);
+    assert!(report["detections"]["total"].as_u64().expect("total") > 0);
+
+    let redact = Command::new(bin())
+        .args([
+            "--config",
+            config.to_str().expect("utf-8 path"),
+            "redact",
+            "--input",
+            corpus.to_str().expect("utf-8 path"),
+            "--output",
+            clean.to_str().expect("utf-8 path"),
+        ])
+        .output()
+        .expect("redact generated corpus");
+    assert!(redact.status.success());
+
+    let redacted = fs::read_to_string(clean).expect("read redacted corpus");
+    assert!(!redacted.contains("@example.test"));
+    assert!(!redacted.contains("synthetic-bearer-token"));
+    assert!(redacted.contains("[REDACTED:email]"));
+    assert!(redacted.contains("[REDACTED:bearer_token]"));
+
+    let assert_output = Command::new(bin())
+        .args([
+            "--config",
+            config.to_str().expect("utf-8 path"),
+            "assert",
+            "--input",
+            corpus.to_str().expect("utf-8 path"),
+        ])
+        .output()
+        .expect("assert generated corpus");
+    assert!(!assert_output.status.success());
+}
+
+#[test]
+fn generate_corpus_rejects_zero_lines() {
+    let output = Command::new(bin())
+        .args(["generate-corpus", "--lines", "0"])
+        .output()
+        .expect("generate empty corpus");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("stderr is utf-8");
+
+    assert!(stderr.contains("lines must be greater than zero"));
+}
+
+#[test]
 fn redact_file_masks_sensitive_values() {
     let dir = tempdir().expect("tempdir");
     let config = write_config(dir.path());
