@@ -79,3 +79,22 @@ curl http://127.0.0.1:8080/metrics/prometheus
 ```
 
 Metrics include request counts, rejected payload counts, byte counts and redaction counts by detector type. They never include matched values, header values, request bodies or samples.
+
+Minimal local Prometheus scrape config:
+
+```yaml
+scrape_configs:
+  - job_name: privacy-proxy
+    metrics_path: /metrics/prometheus
+    static_configs:
+      - targets:
+          - 127.0.0.1:8080
+```
+
+With the proxy listening on `127.0.0.1:8080`, Prometheus scrapes:
+
+```text
+http://127.0.0.1:8080/metrics/prometheus
+```
+
+Keep the target local unless the proxy metrics endpoint is intentionally exposed through your monitoring network.
