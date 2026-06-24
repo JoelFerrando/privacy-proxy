@@ -18,6 +18,43 @@ jobs:
 
 The action prints aggregate counts only. It does not print matched values.
 
+## Synthetic Fixture Examples
+
+The `examples/observability/` directory contains small before/after fixtures for
+common observability shapes. All values are synthetic and safe for
+documentation.
+
+Run the Sentry-shaped example:
+
+```sh
+privacy-proxy --config examples/privacy-proxy.toml redact \
+  --input examples/observability/sentry.input.jsonl \
+  --output /tmp/sentry.masked.jsonl
+diff -u examples/observability/sentry.masked.jsonl /tmp/sentry.masked.jsonl
+```
+
+Run the Loki-shaped example:
+
+```sh
+privacy-proxy --config examples/privacy-proxy.toml redact \
+  --input examples/observability/loki.input.jsonl \
+  --output /tmp/loki.masked.jsonl
+diff -u examples/observability/loki.masked.jsonl /tmp/loki.masked.jsonl
+```
+
+Use `assert` to demonstrate the CI failure mode against the intentionally leaky
+inputs:
+
+```sh
+privacy-proxy --config examples/privacy-proxy.toml assert \
+  --input examples/observability/sentry.input.jsonl
+privacy-proxy --config examples/privacy-proxy.toml assert \
+  --input examples/observability/loki.input.jsonl
+```
+
+Those commands should exit non-zero and print aggregate counts only. They should
+not print matched values.
+
 ## Sentry
 
 ```sh
