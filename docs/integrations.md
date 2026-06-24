@@ -104,9 +104,11 @@ privacy-proxy --config examples/privacy-proxy.toml serve \
   --listen 127.0.0.1:8080
 ```
 
-Then configure the sender to use `http://127.0.0.1:8080`. The proxy redacts UTF-8 JSON, JSONL/NDJSON and text bodies, replaces sensitive headers before forwarding, enforces `max_body_bytes`, and exposes aggregate JSON metrics at `/metrics` plus Prometheus metrics at `/metrics/prometheus`.
+Then configure the sender to use `http://127.0.0.1:8080`. The proxy redacts UTF-8 JSON, JSONL/NDJSON and text bodies, decodes gzip request bodies before redaction, replaces sensitive headers before forwarding, enforces `max_body_bytes`, and exposes aggregate JSON metrics at `/metrics` plus Prometheus metrics at `/metrics/prometheus`.
 
-Deep protocol-aware OTLP support is still future work. In particular, compressed protobuf OTLP payloads are not decoded by this MVP; route JSON/HTTP logs through the proxy first.
+Gzip support is intended for UTF-8 JSON, JSONL/NDJSON and text request bodies. The proxy forwards the redacted body uncompressed and strips `Content-Encoding`/`Content-Length` before forwarding. Unsupported content encodings are rejected with `415`, and oversized decompressed bodies are rejected with `413`.
+
+Deep protocol-aware OTLP protobuf support is still future work. Route JSON/HTTP logs through the proxy first.
 
 ## HTTP Proxy Metrics
 
