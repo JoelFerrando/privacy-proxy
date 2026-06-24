@@ -10,12 +10,14 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
 use bytes::Bytes;
+use flate2::read::GzDecoder;
 use privacy_proxy_core::{Config, DetectorKind, Engine, Error as CoreError, ScanReport};
 use serde::Serialize;
 use serde_json::Value;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
+use std::io::Read as _;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -208,7 +210,46 @@ async fn proxy(State(state): State<ProxyState>, request: Request<Body>) -> Respo
         .request_bytes
         .fetch_add(request_bytes.len() as u64, Ordering::Relaxed);
 
-    let redacted = match redact_body(&state.engine, &request_bytes, content_type.as_ref()) {
+    let decoded_body = match decode_request_body(
+        request_bytes,
+        headers.get(CONTENT_ENCODING),
+        state.config.max_body_bytes,
+    ) {
+        Ok(body) => body,
+        Err(BodyDecodeError::UnsupportedContentEncoding) => {
+            state
+                .metrics
+                .rejected_payloads
+                .fetch_add(1, Ordering::Relaxed);
+            return plain_response(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "unsupported request content-encoding; only identity and gzip are supported\n",
+            );
+        }
+        Err(BodyDecodeError::DecompressedTooLarge) => {
+            state
+                .metrics
+                .rejected_payloads
+                .fetch_add(1, Ordering::Relaxed);
+            return plain_response(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "decompressed request body exceeds configured max_body_bytes\n",
+            );
+        }
+        Err(BodyDecodeError::Gzip(error)) => {
+            state
+                .metrics
+                .rejected_payloads
+                .fetch_add(1, Ordering::Relaxed);
+            warn!(%error, "gzip request body decode failed");
+            return plain_response(
+                StatusCode::BAD_REQUEST,
+                "gzip request body could not be decoded\n",
+            );
+        }
+    };
+
+    let redacted = match redact_body(&state.engine, &decoded_body, content_type.as_ref()) {
         Ok(redacted) => redacted,
         Err(BodyRedactionError::InvalidUtf8) => {
             state
@@ -421,6 +462,24 @@ struct RedactedBody {
     stats: ScanReport,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RequestContentEncoding {
+    Identity,
+    Gzip,
+}
+
+#[derive(Debug, Error)]
+enum BodyDecodeError {
+    #[error("unsupported request content-encoding")]
+    UnsupportedContentEncoding,
+
+    #[error("decompressed request body exceeds configured max_body_bytes")]
+    DecompressedTooLarge,
+
+    #[error("gzip request body could not be decoded")]
+    Gzip(#[source] std::io::Error),
+}
+
 #[derive(Debug, Error)]
 enum BodyRedactionError {
     #[error("request body is not valid UTF-8")]
@@ -431,6 +490,50 @@ enum BodyRedactionError {
 
     #[error("request body serialization failed")]
     JsonSerialize(#[source] serde_json::Error),
+}
+
+fn decode_request_body(
+    body: Bytes,
+    content_encoding: Option<&HeaderValue>,
+    max_body_bytes: usize,
+) -> std::result::Result<Bytes, BodyDecodeError> {
+    match request_content_encoding(content_encoding)? {
+        RequestContentEncoding::Identity => Ok(body),
+        RequestContentEncoding::Gzip => {
+            let mut decoder = GzDecoder::new(&body[..]);
+            let mut limited = decoder
+                .by_ref()
+                .take(max_body_bytes.saturating_add(1) as u64);
+            let mut output = Vec::new();
+            limited
+                .read_to_end(&mut output)
+                .map_err(BodyDecodeError::Gzip)?;
+
+            if output.len() > max_body_bytes {
+                return Err(BodyDecodeError::DecompressedTooLarge);
+            }
+
+            Ok(Bytes::from(output))
+        }
+    }
+}
+
+fn request_content_encoding(
+    content_encoding: Option<&HeaderValue>,
+) -> std::result::Result<RequestContentEncoding, BodyDecodeError> {
+    let Some(content_encoding) = content_encoding else {
+        return Ok(RequestContentEncoding::Identity);
+    };
+    let Ok(raw) = content_encoding.to_str() else {
+        return Err(BodyDecodeError::UnsupportedContentEncoding);
+    };
+    let normalized = raw.trim().to_ascii_lowercase();
+
+    match normalized.as_str() {
+        "" | "identity" => Ok(RequestContentEncoding::Identity),
+        "gzip" => Ok(RequestContentEncoding::Gzip),
+        _ => Err(BodyDecodeError::UnsupportedContentEncoding),
+    }
 }
 
 fn redact_body(
@@ -656,7 +759,10 @@ mod tests {
     use super::*;
     use axum::http::{HeaderValue, Uri};
     use axum::routing::any;
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
     use privacy_proxy_core::Config;
+    use std::io::Write as _;
     use std::sync::MutexGuard;
     use tower::ServiceExt;
 
@@ -683,6 +789,7 @@ mod tests {
     struct ReceivedRequest {
         path_and_query: String,
         authorization: Option<String>,
+        content_encoding: Option<String>,
         cookie: Option<String>,
         x_session_id: Option<String>,
         body: String,
@@ -713,6 +820,7 @@ mod tests {
                 .map(|value| value.as_str().to_owned())
                 .unwrap_or_else(|| uri.path().to_owned()),
             authorization: header_to_string(&headers, "authorization"),
+            content_encoding: header_to_string(&headers, "content-encoding"),
             cookie: header_to_string(&headers, "cookie"),
             x_session_id: header_to_string(&headers, "x-session-id"),
             body,
@@ -832,6 +940,109 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn forwards_redacted_gzip_request_uncompressed() {
+        let capture = UpstreamCapture::default();
+        let upstream = Router::new()
+            .fallback(any(upstream_handler))
+            .with_state(capture.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind upstream listener");
+        let upstream_addr = listener.local_addr().expect("read upstream address");
+        let upstream_server = tokio::spawn(async move { axum::serve(listener, upstream).await });
+
+        let config = Config::default();
+        let proxy_state = ProxyState {
+            target: Url::parse(&format!("http://{upstream_addr}/collect")).expect("url parses"),
+            client: reqwest::Client::new(),
+            engine: Engine::new(config.clone()).expect("engine builds"),
+            config,
+            metrics: Arc::new(ProxyMetrics::default()),
+        };
+        let input = br#"{"email":"alice@example.test","message":"from 203.0.113.5"}"#.as_slice();
+        let request = Request::builder()
+            .method("POST")
+            .uri("/gzip")
+            .header(CONTENT_TYPE, "application/json")
+            .header(CONTENT_ENCODING, "gzip")
+            .body(Body::from(gzip_bytes(input)))
+            .expect("request builds");
+
+        let response = router(proxy_state)
+            .oneshot(request)
+            .await
+            .expect("proxy responds");
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let received = capture.take();
+        assert_eq!(received.path_and_query, "/collect/gzip");
+        assert_eq!(received.content_encoding, None);
+        assert!(received.body.contains("[REDACTED:email]"));
+        assert!(received.body.contains("[REDACTED:ip]"));
+        assert!(!received.body.contains("alice@example.test"));
+        assert!(!received.body.contains("203.0.113.5"));
+
+        upstream_server.abort();
+    }
+
+    #[tokio::test]
+    async fn rejects_oversized_decompressed_gzip_without_echoing_content() {
+        let config = Config {
+            max_body_bytes: 64,
+            ..Config::default()
+        };
+        let input = format!("secret-token-value {}", "a".repeat(512));
+        let request = Request::builder()
+            .method("POST")
+            .uri("/logs")
+            .header(CONTENT_TYPE, "text/plain")
+            .header(CONTENT_ENCODING, "gzip")
+            .body(Body::from(gzip_bytes(input.as_bytes())))
+            .expect("request builds");
+
+        let response = router(state(config))
+            .oneshot(request)
+            .await
+            .expect("router responds");
+        let status = response.status();
+        let body = to_bytes(response.into_body(), 1024)
+            .await
+            .expect("body reads");
+        let body = std::str::from_utf8(&body).expect("body is utf-8");
+
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+        assert!(body.contains("decompressed"));
+        assert!(body.contains("max_body_bytes"));
+        assert!(!body.contains("secret-token-value"));
+    }
+
+    #[tokio::test]
+    async fn rejects_unsupported_content_encoding_without_echoing_content() {
+        let request = Request::builder()
+            .method("POST")
+            .uri("/logs")
+            .header(CONTENT_TYPE, "text/plain")
+            .header(CONTENT_ENCODING, "br")
+            .body(Body::from("secret-token-value"))
+            .expect("request builds");
+
+        let response = router(state(Config::default()))
+            .oneshot(request)
+            .await
+            .expect("router responds");
+        let status = response.status();
+        let body = to_bytes(response.into_body(), 1024)
+            .await
+            .expect("body reads");
+        let body = std::str::from_utf8(&body).expect("body is utf-8");
+
+        assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        assert!(body.contains("content-encoding"));
+        assert!(!body.contains("secret-token-value"));
+    }
+
+    #[tokio::test]
     async fn forwards_redacted_request_to_real_upstream_and_records_metrics() {
         let capture = UpstreamCapture::default();
         let upstream = Router::new()
@@ -938,5 +1149,11 @@ mod tests {
             prometheus_escape_label_value("line\nquote\"slash\\"),
             "line\\nquote\\\"slash\\\\"
         );
+    }
+
+    fn gzip_bytes(input: &[u8]) -> Bytes {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(input).expect("test gzip write succeeds");
+        Bytes::from(encoder.finish().expect("test gzip finish succeeds"))
     }
 }

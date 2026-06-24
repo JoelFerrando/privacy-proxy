@@ -116,8 +116,9 @@ Then point a log sender at `http://127.0.0.1:8080`. Requests are forwarded to th
 - UTF-8 JSON objects redacted recursively
 - JSONL/NDJSON bodies redacted line by line
 - text bodies redacted as strings
+- gzip request bodies decoded before redaction and forwarded uncompressed
 - sensitive headers such as `authorization`, `cookie`, `set-cookie`, API key/token/secret/password/session headers replaced before forwarding
-- request bodies capped by `max_body_bytes`
+- request bodies capped by `max_body_bytes` before and after gzip decompression
 - aggregate JSON metrics at `GET /metrics`
 - Prometheus metrics at `GET /metrics/prometheus`
 - liveness at `GET /healthz`
@@ -199,7 +200,11 @@ The MVP supports:
 
 JSON objects and arrays are walked recursively. Non-JSON lines are treated as plain text. Processing is streaming and line-oriented, so the CLI does not load the whole log file into memory.
 
-`max_line_bytes` limits each input line before redaction/scan work continues. `max_body_bytes` limits each HTTP proxy request body before redaction work starts.
+`max_line_bytes` limits each input line before redaction/scan work continues.
+`max_body_bytes` limits each HTTP proxy request body before redaction work
+starts. For gzip request bodies, the same `max_body_bytes` limit applies to
+both compressed bytes received from the client and decompressed bytes before
+redaction.
 
 ## Rust API
 
@@ -234,7 +239,7 @@ See [docs/performance.md](docs/performance.md) for what is measured, JSONL small
 
 ## Limits
 
-Redaction is best-effort. False positives and false negatives are possible, especially in unstructured text, custom token formats, nested encodings, compressed payloads, encrypted blobs, and application-specific identifiers.
+Redaction is best-effort. False positives and false negatives are possible, especially in unstructured text, custom token formats, nested encodings, unsupported compression formats, encrypted blobs, and application-specific identifiers.
 
 Run `scan` in CI or staging to understand what the configured detectors see before enabling redaction in production pipelines. Keep configs reviewed like security-sensitive code.
 
@@ -252,7 +257,7 @@ Near-term improvements:
 
 - Add corpus-based benchmarks with realistic Sentry, Datadog, Loki and OpenTelemetry JSON shapes.
 - Add proxy streaming for very large bodies instead of buffering up to `max_body_bytes`.
-- Add gzip/zstd request body support with decompression limits.
+- Add zstd request body support and streaming decompression for large gzip bodies.
 - Add middleware helpers for common web frameworks.
 - Add deeper OTLP/HTTP support for OpenTelemetry collector topologies.
 - Publish crates.io packages and container images from protected release workflows.
