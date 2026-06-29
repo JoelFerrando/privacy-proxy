@@ -52,7 +52,7 @@ jobs:
           Copy-Item README.md,LICENSE-MIT,LICENSE-APACHE dist/
           Compress-Archive -Path dist/* -DestinationPath "${{ matrix.archive }}"
       - name: Upload package artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.archive }}
           path: ${{ matrix.archive }}
@@ -64,7 +64,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download package artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release-assets
           merge-multiple: true
